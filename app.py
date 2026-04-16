@@ -2,26 +2,50 @@ import streamlit as st
 import pandas as pd
 import re
 
-def extract_strict_locality(text):
+# Aapki di gayi areas ki complete list
+LOCALITY_LIST = [
+    "Baner", "Wakad", "Tathawade", "Punawale", "Nigdi", "Ravet", "Rahatani", "Khadki", "Kiwale", 
+    "Walhekarwadi", "Morwadi", "Vikasnagar", "Mamurdi", "Wagholi", "Kharadi", "Viman Nagar", 
+    "Lohegaon", "Lohgaon", "Chandan Nagar", "Koregaon Park", "Magarpatta", "Kesnand", "Mundhwa", 
+    "Manjari", "manjri", "Keshavnagar", "Bakori", "Kalyani Nagar", "Wadgaon Sheri", "Vadgaon Sheri", 
+    "Hadapsar", "Undri", "Undari", "NIBM", "Pisoli", "Handewadi", "Ghorpadi", "Fursungi", "saswad", 
+    "Dapodi", "Kasarwadi", "Bhosari", "Moshi", "Dighi", "Alandi", "Kondhwa", "Tingre Nagar", 
+    "Bhekraiwadi", "BMCC", "Peth", "Bibewadi", "Sadashiv Peth", "Narayan Peth", "Shaniwar Peth", 
+    "Navi Peth", "Nana Peth", "Rasta Peth", "Bhawani Peth", "Laxmi Road", "Appa Balwant Chowk", 
+    "Kasba Peth", "Ganesh Peth", "Shivajinagar", "Deccan", "Model Colony", "Gokhale Nagar", 
+    "Bhosale Nagar", "Range Hills", "Prabhat Road", "FC Road", "Fergusson College Road", 
+    "Agarkar Road", "Appasaheb Chiplunkar Road", "Hanuman Nagar", "Senapati Bapat Road", 
+    "Parvati Peth", "Padmavati Peth", "Budhwar Peth", "Shukrawar Peth", "Raviwar Peth", 
+    "Somwar Peth", "Mangalwar Peth", "Guruwar Peth", "Hinjewadi", "Aundh", "Balewadi", "Bavdhan", 
+    "Sus", "Pashan", "Kothrud", "Warje", "Katraj", "Sinhgadh Road", "Sinhgad Road", "Blue Ridge", 
+    "Camp", "Dhayri", "Dhayari", "Dhanori", "Gahunje", "Karvenagar", "Lodha Belmondo", "Pimple Gurav", 
+    "Pimple Nilakh", "Pimple Saudagar", "Pride World City", "Vishrantwadi", "Pimpri", "Chinchwad", 
+    "Bhokhel", "Khadakwasla", "Ambegaon Budruk", "Ambegaon Bk", "Ambegaon", "Shikrapur", 
+    "Charholi Budruk", "Talegaon Dabhade", "Bhoirwadi", "Wadmukhwadi", "Bhugaon", "Kanhe", 
+    "Dhankawadi", "Nanded", "Karandi Kh.", "Chakan", "Lonikand", "Borhade Wadi", "Bhukum", 
+    "Ghotawade", "Jambhul", "Thergaon", "Mahalunge", "Sudumbre", "Kamshet", "Dudulgaon", "Charoli",
+    "Hinjewadi Phase 1", "Hinjewadi Phase 2", "Hinjewadi Phase 3", "Phase 1 Hinjewadi", 
+    "Phase 2 Hinjewadi", "Phase 3 Hinjewadi"
+]
+
+def extract_clean_locality(text):
     if not text or text == 'N/A': return 'N/A'
     
-    # 1. 'in ', 'at ', 'the ' jaise words shuruat se hatayein
-    text = re.sub(r'^(in|at|the)\s+', '', text.strip(), flags=re.IGNORECASE)
+    # 1. Sabse pehle line mein check karein ki kya hamari list ka koi area hai
+    # Badi string pehle check karenge (e.g. 'Hinjewadi Phase 1' before 'Hinjewadi')
+    sorted_localities = sorted(LOCALITY_LIST, key=len, reverse=True)
     
-    # 2. Pune, Maharashtra aur extra words hatayein
-    text = re.sub(r',?\s*Pune|,?\s*Maharashtra|,?\s*Budruk|,?\s*Khurd|\d{6}', '', text, flags=re.IGNORECASE).strip()
+    for area in sorted_localities:
+        if area.lower() in text.lower():
+            return area
+            
+    # 2. Agar list mein nahi mila, toh 'in ', 'at ' hatakar last word lo (fallback)
+    text_clean = re.sub(r'^(in|at|the)\s+', '', text.strip(), flags=re.IGNORECASE)
+    text_clean = re.sub(r',?\s*Pune|,?\s*Maharashtra|\d{6}', '', text_clean, flags=re.IGNORECASE).strip()
     
-    # 3. Sabse important: Agar line mein multiple words hain (e.g., "Exotica Wagholi")
-    # Toh comma se pehle wale hisse ka "Aakhri Word" hi Area hota hai.
-    # Example: "Ajmera Exotica Wagholi" -> parts["Ajmera Exotica Wagholi"] -> last word "Wagholi"
-    main_part = text.split(',')[0].strip()
+    main_part = text_clean.split(',')[0].strip()
     words = main_part.split()
-    
-    if words:
-        # Aakhri word area hota hai
-        return words[-1].strip()
-    
-    return text
+    return words[-1].strip() if words else text_clean
 
 def convert_to_numeric_price(price_str):
     if price_str == 'N/A' or not price_str: return 'N/A'
@@ -34,7 +58,7 @@ def convert_to_numeric_price(price_str):
     elif unit in ['cr', 'cr.']: return int(value * 10000000)
     else: return int(value)
 
-def parse_leads_v10(text):
+def parse_leads_v11(text):
     segments = re.split(r'(?=Property Code)', text)
     data = []
     
@@ -43,7 +67,7 @@ def parse_leads_v10(text):
         lines = [line.strip() for line in seg.split('\n') if line.strip()]
         entry = {col: 'N/A' for col in ['property_id', 'property_type', 'special_note', 'owner_name', 'owner_contact', 'area', 'address', 'sub_property_type', 'size', 'furnishing_status', 'availability', 'floor', 'tenant_preference', 'additional_details', 'age', 'rent_or_sell_price', 'deposit', 'date_stamp', 'rent_sold_out']}
         
-        # Identity
+        # Date & ID
         date_m = re.search(r'(\d{2}\.\d{2}\.\d{4})', seg)
         if date_m: entry['date_stamp'] = date_m.group(1)
         entry['property_type'] = "Res_rental" if "Rent Property" in seg else "Res_resale"
@@ -68,13 +92,12 @@ def parse_leads_v10(text):
                 if s_m: entry['size'] = s_m.group(1).replace(',', '') + " sq.ft"
                 break
         
-        # AREA EXTRACTION (The strict fix)
+        # AREA EXTRACTION
         if size_idx != -1 and size_idx + 1 < len(lines):
-            area_raw_line = lines[size_idx+1]
-            # Sirf aakhri word lega locality ke liye
-            entry['area'] = extract_strict_locality(area_raw_line)
+            area_raw = lines[size_idx+1]
+            entry['area'] = extract_clean_locality(area_raw)
             
-            # Address line (Next line)
+            # Address
             if size_idx + 2 < len(lines):
                 addr_line = lines[size_idx+2]
                 if not any(x in addr_line for x in ["Rent:", "Lac", "Cr", "₹", "L "]):
@@ -96,12 +119,12 @@ def parse_leads_v10(text):
         data.append(entry)
     return pd.DataFrame(data)
 
-# UI
-st.set_page_config(page_title="Cleardeals Final v10", layout="wide")
-st.title("🎯 Property Lead Converter (Strict Area Fix)")
+st.set_page_config(page_title="EasyProp v11", layout="wide")
+st.title("🏡 Property Lead Extractor (Full Pune Areas)")
+st.info("Ab ye tool aapke diye gaye 200+ Pune areas ko priority dega.")
 input_text = st.text_area("Paste Data:", height=400)
-if st.button("Generate CSV"):
+if st.button("Extract Data"):
     if input_text:
-        df = parse_leads_v10(input_text)
+        df = parse_leads_v11(input_text)
         st.dataframe(df)
-        st.download_button("Download CSV", df.to_csv(index=False).encode('utf-8'), "leads_proper_area.csv")
+        st.download_button("Download CSV", df.to_csv(index=False).encode('utf-8'), "property_leads_v11.csv")
