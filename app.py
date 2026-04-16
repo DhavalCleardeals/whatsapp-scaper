@@ -2,18 +2,26 @@ import streamlit as st
 import pandas as pd
 import re
 
-def clean_only_area(text):
+def extract_strict_locality(text):
     if not text or text == 'N/A': return 'N/A'
-    # Step 1: Remove common noise
-    text = re.sub(r',?\s*\bPune\b|,?\s*\bMaharashtra\b|,?\s*\bIndia\b|\bBudruk\b|\bKhurd\b|\d{6}', '', text, flags=re.IGNORECASE).strip()
-    # Step 2: Excel sheet ke mutabiq sirf main Locality rakhni hai
-    # Agar line mein comma hai "Indira Nagar, Undri", toh aakhri word main area hai
-    parts = [p.strip() for p in text.split(',') if p.strip()]
-    if len(parts) > 1:
-        return parts[-1]
-    # Agar single word hai aur building/project keyword hai, toh use saaf karein
-    clean_val = re.sub(r'Society|Apartment|Heights|Residency|Villa|Complex|Garden|Park|Vihar|Phase\s?\d+|Project', '', parts[0], flags=re.IGNORECASE).strip()
-    return clean_val if clean_val else parts[0]
+    
+    # 1. 'in ', 'at ', 'the ' jaise words shuruat se hatayein
+    text = re.sub(r'^(in|at|the)\s+', '', text.strip(), flags=re.IGNORECASE)
+    
+    # 2. Pune, Maharashtra aur extra words hatayein
+    text = re.sub(r',?\s*Pune|,?\s*Maharashtra|,?\s*Budruk|,?\s*Khurd|\d{6}', '', text, flags=re.IGNORECASE).strip()
+    
+    # 3. Sabse important: Agar line mein multiple words hain (e.g., "Exotica Wagholi")
+    # Toh comma se pehle wale hisse ka "Aakhri Word" hi Area hota hai.
+    # Example: "Ajmera Exotica Wagholi" -> parts["Ajmera Exotica Wagholi"] -> last word "Wagholi"
+    main_part = text.split(',')[0].strip()
+    words = main_part.split()
+    
+    if words:
+        # Aakhri word area hota hai
+        return words[-1].strip()
+    
+    return text
 
 def convert_to_numeric_price(price_str):
     if price_str == 'N/A' or not price_str: return 'N/A'
@@ -26,7 +34,7 @@ def convert_to_numeric_price(price_str):
     elif unit in ['cr', 'cr.']: return int(value * 10000000)
     else: return int(value)
 
-def parse_leads_final(text):
+def parse_leads_v10(text):
     segments = re.split(r'(?=Property Code)', text)
     data = []
     
@@ -35,20 +43,20 @@ def parse_leads_final(text):
         lines = [line.strip() for line in seg.split('\n') if line.strip()]
         entry = {col: 'N/A' for col in ['property_id', 'property_type', 'special_note', 'owner_name', 'owner_contact', 'area', 'address', 'sub_property_type', 'size', 'furnishing_status', 'availability', 'floor', 'tenant_preference', 'additional_details', 'age', 'rent_or_sell_price', 'deposit', 'date_stamp', 'rent_sold_out']}
         
-        # 1. Basic Identity
+        # Identity
         date_m = re.search(r'(\d{2}\.\d{2}\.\d{4})', seg)
         if date_m: entry['date_stamp'] = date_m.group(1)
         entry['property_type'] = "Res_rental" if "Rent Property" in seg else "Res_resale"
         id_m = re.search(r'Property Code\s+([A-Z0-9]+)', seg)
         if id_m: entry['property_id'] = id_m.group(1)
         
-        # 2. Owner Details
+        # Owner
         owner_m = re.search(r'Owner Details:\s*\n?([^\d\n]+)\s+(\d{10})', seg)
         if owner_m:
             entry['owner_name'] = owner_m.group(1).strip()
             entry['owner_contact'] = owner_m.group(2).strip()
 
-        # 3. Locate Size Line for Area/Address
+        # Size Line
         size_idx = -1
         for i, line in enumerate(lines):
             if any(x in line.lower() for x in ["super built-up area", "sqft", "sq.ft"]):
@@ -60,18 +68,19 @@ def parse_leads_final(text):
                 if s_m: entry['size'] = s_m.group(1).replace(',', '') + " sq.ft"
                 break
         
-        # 4. Area vs Address (Excel logic)
+        # AREA EXTRACTION (The strict fix)
         if size_idx != -1 and size_idx + 1 < len(lines):
-            # Area line (Strict Cleaning)
-            entry['area'] = clean_only_area(lines[size_idx+1])
+            area_raw_line = lines[size_idx+1]
+            # Sirf aakhri word lega locality ke liye
+            entry['area'] = extract_strict_locality(area_raw_line)
             
-            # Address line (Puri line as it is)
+            # Address line (Next line)
             if size_idx + 2 < len(lines):
                 addr_line = lines[size_idx+2]
                 if not any(x in addr_line for x in ["Rent:", "Lac", "Cr", "₹", "L "]):
-                    entry['address'] = addr_line.replace(', Pune', '').strip()
+                    entry['address'] = addr_line.strip()
 
-        # 5. Price Conversion
+        # Price
         price_val = 'N/A'
         rent_m = re.search(r'Rent:\s*(\d+)', seg)
         price_m = re.search(r'(?:₹|Rs\.?|)\s*(\d+(?:\.\d+)?)\s*(Lac|Cr|L|Cr\.)', seg, re.I)
@@ -79,7 +88,7 @@ def parse_leads_final(text):
         elif price_m: price_val = price_m.group(0)
         entry['rent_or_sell_price'] = convert_to_numeric_price(price_val)
         
-        # 6. Furnishing
+        # Furnishing
         if "semi" in seg.lower(): entry['furnishing_status'] = "Semi-Furnished"
         elif "unfurnished" in seg.lower(): entry['furnishing_status'] = "Unfurnished"
         elif "fully" in seg.lower() or "furnished" in seg.lower(): entry['furnishing_status'] = "Furnished"
@@ -87,11 +96,12 @@ def parse_leads_final(text):
         data.append(entry)
     return pd.DataFrame(data)
 
-st.set_page_config(page_title="Cleardeals Final", layout="wide")
-st.title("🎯 Property Extractor (Final Excel Format)")
+# UI
+st.set_page_config(page_title="Cleardeals Final v10", layout="wide")
+st.title("🎯 Property Lead Converter (Strict Area Fix)")
 input_text = st.text_area("Paste Data:", height=400)
-if st.button("Generate Excel Data"):
+if st.button("Generate CSV"):
     if input_text:
-        df = parse_leads_final(input_text)
+        df = parse_leads_v10(input_text)
         st.dataframe(df)
-        st.download_button("Download CSV", df.to_csv(index=False).encode('utf-8'), "leads_final.csv")
+        st.download_button("Download CSV", df.to_csv(index=False).encode('utf-8'), "leads_proper_area.csv")
